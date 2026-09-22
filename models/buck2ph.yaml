@@ -1,0 +1,162 @@
+# buck2ph — two-phase interleaved peak-current-mode asynchronous buck,
+# third-topology generality model (CPP_MIGRATION_AND_TOPOLOGY_PLAN T2).
+# 12 V -> 5 V / 2 A (R1 = 2.5 ohm) at 400 kHz PER PHASE, phases 180 deg
+# apart (V3B delayed T/2); effective output ripple frequency 800 kHz.
+#
+# DECLARED current sharing (plan T2 requires an explicit choice):
+#   independent peak loops — each phase has its own H sense, comparator,
+#   slope ramp and clocked SR latch; only the EA command is shared.  Peak
+#   CMC + phase symmetry gives inherent current sharing (IL_A ~ IL_B ~ 1 A).
+#
+# Parameter provenance (everything reuses verified numbers):
+# - per-phase power/sense/ramp values are PS15's exact operating point
+#   (L = 4.7 u, k = 107 m, Se = 200 kV/s, v_cmd ~ 190 mV, valley +0.22 A
+#   CCM at 1 A per phase) on the simpler asynchronous stage boost24 used
+#   (S + freewheel D + CSW; no dead-time logic needed).
+# - EA gm is HALVED (24 u -> 12 u): two parallel peak-current loops double
+#   the power-stage transconductance seen by the shared EA, so halving gm
+#   restores the composite loop to the PS15-proven shape (~27 kHz / ~67 deg).
+#
+# Expected interleaved sum-current ripple (the acceptance formula, plan T2
+# forbids hardcoding "must be < half"):  dI_sum = dIL*(1-2D)/(1-D) for
+# D < 0.5 -> 1.5518 A * 0.1667/0.5833 = 0.4433 A p-p at 800 kHz, i.e.
+# 3.5x cancellation (exact zero at D = 0.5); phase-aligned operation
+# (V3B delay = 0) gives 2*dIL = 3.10 A p-p at 400 kHz, which is also the
+# single-phase-equivalent at the same total load and inductance resource
+# (L_A || L_B = 2.35 u).
+meta:
+  model: buck2ph
+  fidelity: SIMPLIFIED
+  current_sharing: independent_peak_loops
+
+devices:
+  # ---------------- shared power stage
+  - {kind: V,  name: VIN,  n1: vin, n2: "0", value: {dc: 12}}
+  - {kind: R,  name: R8,   n1: vc, n2: vout, r: 5m}                  # Cout ESR
+  - {kind: C,  name: C6,   n1: vc, n2: "0", c: 88u, ic_v: 5}
+  - {kind: R,  name: R1,   n1: vout, n2: "0", r: 2.5}                # load 2 A
+
+  # ---------------- phase A power stage (PS15 values, async like boost24)
+  - {kind: SW, name: S1A,  d1: vin, d2: swa, c1: ha, c2: "0",
+     ron: 1m, roff: 10Meg, threshold: 2, hystwd: 100m, ic: OPEN}
+  - {kind: D,  name: DA,   a: "0", k: swa, vf: 500m, ron: 10m, roff: 1G}
+  - {kind: C,  name: CSWA, n1: swa, n2: "0", c: 100p, ic_v: 0}
+  - {kind: L,  name: LA,   n1: swa, n2: vout, l: 4.7u, ic_i: 0}
+  - {kind: H,  name: H1A,  n1: vsensa, n2: "0", sense_i: LA, k: 107m}
+  - {kind: R,  name: R16A, n1: vsensa, n2: "0", r: 1}
+
+  # ---------------- phase B power stage (identical, clocked 180 deg later)
+  - {kind: SW, name: S1B,  d1: vin, d2: swb, c1: hb, c2: "0",
+     ron: 1m, roff: 10Meg, threshold: 2, hystwd: 100m, ic: OPEN}
+  - {kind: D,  name: DB,   a: "0", k: swb, vf: 500m, ron: 10m, roff: 1G}
+  - {kind: C,  name: CSWB, n1: swb, n2: "0", c: 100p, ic_v: 0}
+  - {kind: L,  name: LB,   n1: swb, n2: vout, l: 4.7u, ic_i: 0}
+  - {kind: H,  name: H1B,  n1: vsensb, n2: "0", sense_i: LB, k: 107m}
+  - {kind: R,  name: R16B, n1: vsensb, n2: "0", r: 1}
+
+  # ---------------- shared error amplifier (gm halved, see header)
+  - {kind: V,  name: VREF, n1: vref1, n2: "0", value: {dc: 1}}
+  - {kind: G,  name: G1,   n1: "0", n2: ea, na: vref1, nb: fb, gm: 12u}
+  - {kind: R,  name: R19,  n1: eaz, n2: ea, r: 225k}
+  - {kind: C,  name: C12,  n1: eaz, n2: "0", c: 36p, ic_v: 0}
+  - {kind: C,  name: C1,   n1: ea, n2: "0", c: 140f, ic_v: 0}
+  # EA clamps ~50 mV / ~1.21 V (unchanged PS15 network)
+  - {kind: V,  name: V7,   n1: cl_lo, n2: "0", value: {dc: 50m}}
+  - {kind: D,  name: D1,   a: cl_lo, k: ea, vf: 1m, ron: 1m, roff: 1G}
+  - {kind: V,  name: V6,   n1: cl_hi, n2: "0", value: {dc: 1.2}}
+  - {kind: D,  name: D3,   a: ea, k: cl_hi, vf: 1m, ron: 1m, roff: 1G}
+
+  # ---------------- shared feedback divider + lead network + injection
+  - {kind: V,  name: V16,  n1: vout, n2: fbt, value: {dc: 0}}        # AC injected here
+  - {kind: R,  name: R17,  n1: fbt, n2: fb, r: 100k}
+  - {kind: R,  name: R18,  n1: fb, n2: "0", r: 25k}
+  - {kind: C,  name: C4,   n1: fbt, n2: fb3, c: 47p, ic_v: 4}
+  - {kind: R,  name: R3,   n1: fb3, n2: fb, r: 1}
+  - {kind: C,  name: C2,   n1: fb, n2: fb2, c: 10p, ic_v: 1}
+  - {kind: R,  name: R2,   n1: fb2, n2: "0", r: 1}
+
+  # ---------------- slope compensation, phase A (v_cmd = EA - v(C16A))
+  - {kind: I,  name: I3A,  n1: "0", n2: sc4a, value: {dc: 2u}}       # Se = 200 kV/s
+  - {kind: C,  name: C16A, n1: sc4a, n2: "0", c: 10p, ic_v: 0}
+  - {kind: SW, name: S5A,  d1: sc4a, d2: "0", c1: s5ca, c2: "0",
+     ron: 1m, roff: 1T, threshold: 2, hystwd: 100m, ic: CLOSE}
+  - {kind: E,  name: SLOPE_OS1A, n1: slp1a, n2: "0", na: ea, nb: sc4a, k: 1}
+  - {kind: E,  name: SLOPE_OSA,  n1: cmpna, n2: "0", na: slp1a, nb: "0", k: 1}
+
+  # ---------------- slope compensation, phase B (own ramp, 180 deg shifted)
+  - {kind: I,  name: I3B,  n1: "0", n2: sc4b, value: {dc: 2u}}
+  - {kind: C,  name: C16B, n1: sc4b, n2: "0", c: 10p, ic_v: 0}
+  - {kind: SW, name: S5B,  d1: sc4b, d2: "0", c1: s5cb, c2: "0",
+     ron: 1m, roff: 1T, threshold: 2, hystwd: 100m, ic: CLOSE}
+  - {kind: E,  name: SLOPE_OS1B, n1: slp1b, n2: "0", na: ea, nb: sc4b, k: 1}
+  - {kind: E,  name: SLOPE_OSB,  n1: cmpnb, n2: "0", na: slp1b, nb: "0", k: 1}
+
+  # ---------------- PWM logic, phase A (clocked SR + max-duty clamp)
+  - {kind: V,  name: V3A,  n1: clka, n2: "0",
+     value: {pulse: {v1: 0, v2: 5, period: 2.5u, width: 25n, rise: 2.5n, fall: 2.5n}}}
+  - {kind: V,  name: V4A,  n1: maxda, n2: "0",
+     value: {pulse: {v1: 0, v2: 5, period: 2.5u, width: 10n, rise: 2.5n, fall: 2.5n, delay: 2.4u}}}
+  - {kind: CMP, name: PK_CMPA, out: cmpouta, inp: cmpna, inn: vsensa,
+     vol: 0, voh: 5, rout: 10, hystwd: 1p, delay: 1n, ic: 0}
+  - {kind: GATE, name: U7A, out: resetba, inputs: [cmpouta], fn: INV,
+     vol: 0, voh: 5, rout: 41.67, rin: 10Meg, th: 2.15, hystwd: 0.1, delay: 0}
+  - {kind: GATE, name: U3A, out: rstfa, inputs: [resetba, maxda], fn: OR,
+     vol: 0, voh: 5, rout: 10, rin: 10Meg, th: 2.5, hystwd: 1, delay: 2p}
+  - {kind: SRFF, name: U1A, q: pwma, nq: pwmna, s: clka, r: rstfa,
+     vol: 0, voh: 5, rout: 10, rin: 10Meg, th: 2.5, hystwd: 1, delay: 0, ic: 0}
+  - {kind: GATE, name: U2A, out: ha, inputs: [pwma], fn: BUF,
+     vol: 0, voh: 5, rout: 41.67, rin: 10Meg, th: 2.5, hystwd: 1, delay: 2p}
+  # slope-ramp reset while this phase's switch is off (U6/U20 pattern)
+  - {kind: GATE, name: U6A, out: u6oa, inputs: [pwma], fn: BUF,
+     vol: 0, voh: 5, rout: 41.67, rin: 10Meg, th: 2.15, hystwd: 0.1, delay: 1.5n}
+  - {kind: GATE, name: U20A, out: s5ca, inputs: [u6oa], fn: INV,
+     vol: 0, voh: 5, rout: 41.67, rin: 10Meg, th: 2.15, hystwd: 0.1, delay: 0}
+
+  # ---------------- PWM logic, phase B (identical, clocks delayed T/2)
+  - {kind: V,  name: V3B,  n1: clkb, n2: "0",
+     value: {pulse: {v1: 0, v2: 5, period: 2.5u, width: 25n, rise: 2.5n, fall: 2.5n, delay: 1.25u}}}
+  - {kind: V,  name: V4B,  n1: maxdb, n2: "0",
+     value: {pulse: {v1: 0, v2: 5, period: 2.5u, width: 10n, rise: 2.5n, fall: 2.5n, delay: 3.65u}}}
+  - {kind: CMP, name: PK_CMPB, out: cmpoutb, inp: cmpnb, inn: vsensb,
+     vol: 0, voh: 5, rout: 10, hystwd: 1p, delay: 1n, ic: 0}
+  - {kind: GATE, name: U7B, out: resetbb, inputs: [cmpoutb], fn: INV,
+     vol: 0, voh: 5, rout: 41.67, rin: 10Meg, th: 2.15, hystwd: 0.1, delay: 0}
+  - {kind: GATE, name: U3B, out: rstfb, inputs: [resetbb, maxdb], fn: OR,
+     vol: 0, voh: 5, rout: 10, rin: 10Meg, th: 2.5, hystwd: 1, delay: 2p}
+  - {kind: SRFF, name: U1B, q: pwmb, nq: pwmnb, s: clkb, r: rstfb,
+     vol: 0, voh: 5, rout: 10, rin: 10Meg, th: 2.5, hystwd: 1, delay: 0, ic: 0}
+  - {kind: GATE, name: U2B, out: hb, inputs: [pwmb], fn: BUF,
+     vol: 0, voh: 5, rout: 41.67, rin: 10Meg, th: 2.5, hystwd: 1, delay: 2p}
+  - {kind: GATE, name: U6B, out: u6ob, inputs: [pwmb], fn: BUF,
+     vol: 0, voh: 5, rout: 41.67, rin: 10Meg, th: 2.15, hystwd: 0.1, delay: 1.5n}
+  - {kind: GATE, name: U20B, out: s5cb, inputs: [u6ob], fn: INV,
+     vol: 0, voh: 5, rout: 41.67, rin: 10Meg, th: 2.15, hystwd: 0.1, delay: 0}
+
+  # ---------------- POP trigger: phase A clock rising (plan T2)
+  - {kind: TRIG, name: X1, node: clka, vref: 2.5, edge: rising}
+
+probes:
+  VOUT: v(vout)
+  ILA: i(LA)
+  ILB: i(LB)
+  SWA: v(swa)
+  SWB: v(swb)
+  EA: v(ea)
+  PWMA: v(pwma)
+  PWMB: v(pwmb)
+  IIN: i(VIN)
+
+analyses:
+  transient: {tstop: 500u, dt: 10n}
+  pop:
+    pre_cycles: 150
+    max_iter: 100
+    period_guess: 2.5u
+    max_period_factor: 8
+  pac:
+    fstart: 3k
+    fstop: 180k
+    per_decade: 10
+    inject_src: V16
+    probe_a: vout
+    probe_b: fbt

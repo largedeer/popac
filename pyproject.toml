@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "popac"
+version = "0.1.0"
+description = "Open switching-converter loop analysis: periodic operating point (POP) and analytic small-signal loop gain (PAC) via saltation/monodromy"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+authors = [{ name = "largedeer" }]
+keywords = [
+    "power electronics", "switching converter", "DC-DC", "loop gain",
+    "small-signal analysis", "periodic steady state", "POP", "PAC",
+    "Floquet", "saltation matrix", "monodromy", "Bode", "simulation",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Manufacturing",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Electronic Design Automation (EDA)",
+]
+dependencies = ["numpy", "scipy", "pyyaml", "matplotlib"]
+
+[project.scripts]
+popac = "popac.run:main"
+
+[tool.setuptools]
+packages = ["popac"]

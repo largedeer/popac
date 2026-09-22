@@ -1,0 +1,147 @@
+# flyback24 — peak-current-mode DCM flyback, fifth-topology model
+# (CPP_MIGRATION_AND_TOPOLOGY_PLAN T5).  12 V -> ~24.5 V / 0.5 A at
+# 100 kHz.  First application of the T4 mutual-inductance device.
+#
+# DECLARED leakage representation (plan T5: pick ONE, do not double
+# count): COUPLED WINDINGS with implicit leakage — Lp = Ls = 20u (1:1
+# turns), k = 0.98 -> leakage = (1-k)*L = 0.4 uH per winding (diff mode
+# 0.8 uH).  No separate leakage inductor in the netlist.
+# DOT POLARITY: dots are the n1 ends — Lp.n1 = vin, Ls.n1 = gnd — which
+# is the flyback (inverted) phasing: secondary diode conducts only while
+# the primary switch is OFF.
+#
+# DCM design point: magnetizing energy 0.5*Lm*Ip^2*fsw delivers ~13 W;
+# Ip ~ 3.5 A, D ~ 0.58, demag D2 ~ 0.28, D + D2 < 1 (asserted in
+# tests/test_flyback.py).  DCM has no subharmonic instability (valley
+# clamped at zero) — NO slope compensation ramp in this model.
+# Control: peak CMC on i(Lp) (state-based H sense — the sepic24 lesson:
+# never sense an algebraic branch current), clocked SR latch.  EA
+# re-compensated from boost24's values (R19 220k / C12 100n: EA zero
+# ~7 Hz, well below fc ~430 Hz -> PM 77 deg; the stock boost24 EA gave
+# PM 20 deg here, and its faster integrator also bounced POP's N=1
+# Newton into a pseudo-N=2 — see HANDOFF).  The DCM power stage is
+# single-pole; the CCM RHP zero is explicitly NOT an acceptance
+# criterion for this variant (plan section 2.5 — build a CCM variant
+# if RHP verification is wanted).
+#
+# RCD clamp (verification target, plan T5): DCL/CCL/RCL across sw-vin.
+# The rail self-adjusts so RCL dissipation matches the per-cycle charge
+# delivered at switch turn-off (DM transfer transient + ring remnants):
+# settles at ~78 V abs / 0.65 W = 5% of Pout (textbook RCD range 3-8%);
+# the k=0.95 variant (2.5x leakage) pushes it to ~113 V / 1.5 W — the
+# monotone trend asserted in tests/test_flyback.py.
+#
+# Declared conditioning parasitics (PS15 CSW precedent): CSW on the
+# switch node, CDS on the rectifier anode (rectifier junction cap) —
+# both give the fast edges real crossings; neither forms a C loop.
+meta:
+  model: flyback24
+  fidelity: SIMPLIFIED
+  leakage_representation: coupled_windings_implicit
+
+devices:
+  # ---------------- primary
+  - {kind: V, name: VIN, n1: vin, n2: "0", value: {dc: 12}}
+  - {kind: L, name: LP, n1: vin, n2: sw, l: 20u, ic_i: 0}
+  - {kind: C, name: CSW, n1: sw, n2: "0", c: 100p, ic_v: 12}
+  # primary RC snubber (parallel damping of the LP*CSW post-demag ring):
+  # the secondary snubber reflects as a SERIES resistance (tau = L/R
+  # ~ 45 us = 4.5 cycles -- too slow to kill the ring inside the DCM idle
+  # window, so no period-1 orbit exists and POP fell to a marginal N=2).
+  # A parallel R gives tau = 2RC ~ 0.4 us: dead before the next clock.
+  - {kind: R, name: RSP, n1: sw, n2: csp, r: 470}
+  - {kind: C, name: CSP, n1: csp, n2: "0", c: 330p, ic_v: 0}
+  - {kind: SW, name: S1, d1: sw, d2: "0", c1: u2o, c2: "0",
+     ron: 1m, roff: 10Meg, threshold: 2, hystwd: 100m, ic: OPEN}
+  # RCD clamp: absorbs the leakage spike at switch turn-off
+  - {kind: D, name: DCL, a: sw, k: vcl, vf: 300m, ron: 10m, roff: 1G}
+  # RCL sized so the leakage-only input (~0.25 W) holds the clamp ABOVE
+  # the reflected voltage (VIN + VOUT+vf = 36.5 V): sqrt(0.25*6.8k) ~ 41 V
+  # of excess -> vcl ~ 53 V absolute.  A smaller RCL would let the clamp
+  # dip below 36.5 V and steal magnetizing energy during demag.
+  - {kind: C, name: CCL, n1: vcl, n2: vin, c: 100n, ic_v: 41}
+  - {kind: R, name: RCL, n1: vcl, n2: vin, r: 6.8k}
+
+  # ---------------- secondary (dot at the gnd end = inverted phasing)
+  - {kind: L, name: LS, n1: "0", n2: ds, l: 20u, ic_i: 0}
+  - {kind: C, name: CDS, n1: ds, n2: "0", c: 100p, ic_v: 0}
+  - {kind: D, name: D1, a: ds, k: vout, vf: 500m, ron: 10m, roff: 1G}
+  # secondary RC snubber (standard flyback practice): each switching edge
+  # steps v(ds) by ~37 V into the LS*CDS tank and nothing else damps it
+  # (the ring persisted through the whole ON phase and its coupled
+  # primary peaks fed the RCD clamp ~1.8 W).  CS blocks DC.
+  - {kind: R, name: RSNUB, n1: ds, n2: csn, r: 330}
+  - {kind: C, name: CSNUB, n1: csn, n2: vout, c: 330p, ic_v: 25}
+  - {kind: R, name: RESR, n1: vout, n2: co, r: 20m}
+  - {kind: C, name: C6, n1: co, n2: "0", c: 220u, ic_v: 24.5}
+  - {kind: R, name: R1, n1: vout, n2: "0", r: 48}
+
+  # ---------------- the mutual inductance itself (T4 device)
+  - {kind: K, name: K1, l1: LP, l2: LS, k: 0.98}
+
+  # ---------------- current sense: peak CMC on i(LP) (state-based)
+  - {kind: H, name: H1, n1: vsense, n2: "0", sense_i: LP, k: 100m}
+  - {kind: R, name: R16, n1: vsense, n2: "0", r: 1}
+
+  # ---------------- feedback divider + loop injection (boost24 values)
+  - {kind: V, name: V16, n1: vout, n2: fbt, value: {dc: 0}}
+  - {kind: R, name: R17, n1: fbt, n2: fb, r: 100k}
+  - {kind: R, name: R18, n1: fb, n2: "0", r: 11.36k}
+
+  # ---------------- error amplifier (from boost24, clamp range for 6 A)
+  - {kind: V, name: VREF, n1: vref1, n2: "0", value: {dc: 2.5}}
+  - {kind: G, name: G1, n1: "0", n2: ea, na: vref1, nb: fb, gm: 10u}
+  - {kind: R, name: R19, n1: eaz, n2: ea, r: 220k}
+  - {kind: C, name: C12, n1: eaz, n2: "0", c: 100n, ic_v: 0.35}
+  - {kind: C, name: C1, n1: ea, n2: "0", c: 470p, ic_v: 0.35}
+  - {kind: V, name: VCLL, n1: cllo, n2: "0", value: {dc: 0}}
+  - {kind: V, name: VCLH, n1: clhi, n2: "0", value: {dc: 0.6}}
+  - {kind: D, name: DCLL, a: cllo, k: ea, vf: 1m, ron: 1m, roff: 1G}
+  - {kind: D, name: DCLH, a: ea, k: clhi, vf: 1m, ron: 1m, roff: 1G}
+
+  # ---------------- PWM logic (clocked SR + max-duty clamp; no ramp:
+  # DCM has no subharmonic mode)
+  - {kind: V, name: V3, n1: clk, n2: "0",
+     value: {pulse: {v1: 0, v2: 5, period: 10u, width: 100n, rise: 10n, fall: 10n}}}
+  - {kind: V, name: V4, n1: maxd, n2: "0",
+     value: {pulse: {v1: 0, v2: 5, period: 10u, width: 100n, rise: 10n, fall: 10n, delay: 9.4u}}}
+  - {kind: CMP, name: PK_CMP, out: cmpout, inp: ea, inn: vsense,
+     vol: 0, voh: 5, rout: 10, hystwd: 1p, delay: 1n, ic: 0}
+  - {kind: GATE, name: U7, out: resetb, inputs: [cmpout], fn: INV,
+     vol: 0, voh: 5, rout: 41.67, rin: 10Meg, th: 2.15, hystwd: 0.1, delay: 0}
+  - {kind: GATE, name: U3, out: rstf, inputs: [resetb, maxd], fn: OR,
+     vol: 0, voh: 5, rout: 10, rin: 10Meg, th: 2.5, hystwd: 1, delay: 2p}
+  - {kind: SRFF, name: U1, q: pwm, nq: pwmn, s: clk, r: rstf,
+     vol: 0, voh: 5, rout: 10, rin: 10Meg, th: 2.5, hystwd: 1, delay: 0, ic: 0}
+  - {kind: GATE, name: U2, out: u2o, inputs: [pwm], fn: BUF,
+     vol: 0, voh: 5, rout: 41.67, rin: 10Meg, th: 2.5, hystwd: 1, delay: 2p}
+
+  # ---------------- POP trigger (clock rising through 2.5 V)
+  - {kind: TRIG, name: X1, node: clk, vref: 2.5, edge: rising}
+
+probes:
+  VOUT: v(vout)
+  ILP: i(LP)
+  ILS: i(LS)
+  VSW: v(sw)
+  VDS: v(ds)
+  VCL: v(vcl)
+  EA: v(ea)
+  PWM: v(pwm)
+  IIN: i(VIN)
+
+analyses:
+  solver: {chunk: 1u}
+  transient: {tstop: 3m, dt: 20n}
+  pop:
+    pre_cycles: 100
+    max_iter: 100
+    period_guess: 10u
+    max_period_factor: 8
+  pac:
+    fstart: 10
+    fstop: 50k
+    per_decade: 10
+    inject_src: V16
+    probe_a: vout
+    probe_b: fbt

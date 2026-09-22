@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# 仿真输出与大产物（golden 冻结走 tests/golden/，不依赖 out/）
+out/
+*.npy
+
+# 未来 C++ 构建产物
+build/
+dist/
+*.egg-info/
+_deps/
+CMakeFiles/
+cmake-build-*/
+
+# 本地环境
+.venv/
+venv/
+.env
+
+# 本地验证日志（根级）
+out_*.log

@@ -1,0 +1,107 @@
+# boost24 — peak-current-mode asynchronous boost, second-topology
+# generality model (HANDOFF §9.4-2).  12 V -> ~24.5 V / 2 A at 200 kHz.
+#
+# Control (SIMPLIFIED tier): transconductance EA,
+# textbook slope compensation (v_cmd = EA - v(C16), Se = 12.5 kV/s >=
+# 2x the sensed off-slope 0.05*(Vout-Vin)/L / 2 -> solidly comped at
+# D~0.51), clocked SR latch, max-duty clamp.  Power stage is a boost:
+# inductor from VIN to SW, switch SW->GND, free-wheel diode SW->VOUT.
+#
+# D > 0.5 with slope comp exercises the subharmonic physics the PS15
+# buck avoids; RHP zero (1-D)^2 R/L ~ 29 kHz bounds the loop bandwidth.
+meta:
+  model: boost24
+  fidelity: SIMPLIFIED
+
+devices:
+  # ---------------- power stage (boost)
+  - {kind: V, name: VIN, n1: vin, n2: "0", value: {dc: 12}}
+  - {kind: L, name: L1, n1: vin, n2: sw, l: 100u, ic_i: 4.35}
+  - {kind: SW, name: S1, d1: sw, d2: "0", c1: u2o, c2: "0",
+     ron: 1m, roff: 10Meg, threshold: 2, hystwd: 100m, ic: OPEN}
+  - {kind: C, name: CSW, n1: sw, n2: "0", c: 100p, ic_v: 0}
+  - {kind: D, name: D1, a: sw, k: vout, vf: 500m, ron: 10m, roff: 1G}
+  - {kind: R, name: RESR, n1: vout, n2: co, r: 20m}
+  - {kind: C, name: C6, n1: co, n2: "0", c: 220u, ic_v: 24.5}
+  - {kind: R, name: R1, n1: vout, n2: "0", r: 12}
+
+  # ---------------- current sense (peak-current-mode command path)
+  - {kind: H, name: H1, n1: vsense, n2: "0", sense_i: L1, k: 50m}
+  - {kind: R, name: R16, n1: vsense, n2: "0", r: 1}
+
+  # ---------------- feedback divider + loop injection
+  - {kind: V, name: V16, n1: vout, n2: fbt, value: {dc: 0}}   # AC injected here
+  - {kind: R, name: R17, n1: fbt, n2: fb, r: 100k}
+  - {kind: R, name: R18, n1: fb, n2: "0", r: 11.36k}
+
+  # ---------------- error amplifier (transconductance)
+  - {kind: V, name: VREF, n1: vref1, n2: "0", value: {dc: 2.5}}
+  - {kind: G, name: G1, n1: "0", n2: ea, na: vref1, nb: fb, gm: 10u}
+  - {kind: R, name: R19, n1: eaz, n2: ea, r: 68k}
+  - {kind: C, name: C12, n1: eaz, n2: "0", c: 2.2n, ic_v: 0.25}
+  - {kind: C, name: C1, n1: ea, n2: "0", c: 470p, ic_v: 0.25}
+  # clamp EA to a sane command range 0..0.35 V (IL_pk <= 7 A)
+  - {kind: V, name: VCLL, n1: cllo, n2: "0", value: {dc: 0}}
+  - {kind: V, name: VCLH, n1: clhi, n2: "0", value: {dc: 0.35}}
+  - {kind: D, name: DCLL, a: cllo, k: ea, vf: 1m, ron: 1m, roff: 1G}
+  - {kind: D, name: DCLH, a: ea, k: clhi, vf: 1m, ron: 1m, roff: 1G}
+
+  # ---------------- slope compensation: v_cmd = EA - v(C16)
+  # Se = I3/C16 = 125n/10p = 12.5 kV/s (sensed off-slope 6.25 kV/s; rule
+  # Se >= m2/2 for D>0.5, here 2x margin)
+  - {kind: I, name: I3, n1: "0", n2: sc4, value: {dc: 125n}}
+  - {kind: C, name: C16, n1: sc4, n2: "0", c: 10p, ic_v: 0}
+  - {kind: SW, name: S5, d1: sc4, d2: "0", c1: s5c, c2: "0",
+     ron: 1m, roff: 1T, threshold: 2, hystwd: 100m, ic: CLOSE}
+  - {kind: E, name: SLOPE_OS1, n1: slp1, n2: "0", na: ea, nb: sc4, k: 1}
+  - {kind: E, name: SLOPE_OS, n1: cmpn, n2: "0", na: slp1, nb: "0", k: 1}
+
+  # ---------------- PWM logic (clocked SR + max-duty clamp)
+  - {kind: V, name: V3, n1: clk, n2: "0",
+     value: {pulse: {v1: 0, v2: 5, period: 5u, width: 100n, rise: 10n, fall: 10n}}}
+  - {kind: V, name: V4, n1: maxd, n2: "0",
+     value: {pulse: {v1: 0, v2: 5, period: 5u, width: 100n, rise: 10n, fall: 10n, delay: 4.6u}}}
+  - {kind: CMP, name: PK_CMP, out: cmpout, inp: cmpn, inn: vsense,
+     vol: 0, voh: 5, rout: 10, hystwd: 1p, delay: 1n, ic: 0}
+  - {kind: GATE, name: U7, out: resetb, inputs: [cmpout], fn: INV,
+     vol: 0, voh: 5, rout: 41.67, rin: 10Meg, th: 2.15, hystwd: 0.1, delay: 0}
+  - {kind: GATE, name: U3, out: rstf, inputs: [resetb, maxd], fn: OR,
+     vol: 0, voh: 5, rout: 10, rin: 10Meg, th: 2.5, hystwd: 1, delay: 2p}
+  - {kind: SRFF, name: U1, q: pwm, nq: pwmn, s: clk, r: rstf,
+     vol: 0, voh: 5, rout: 10, rin: 10Meg, th: 2.5, hystwd: 1, delay: 0, ic: 0}
+  - {kind: GATE, name: U2, out: u2o, inputs: [pwm], fn: BUF,
+     vol: 0, voh: 5, rout: 41.67, rin: 10Meg, th: 2.5, hystwd: 1, delay: 2p}
+  # slope-ramp reset while the switch is off (U6/U20 pattern)
+  - {kind: GATE, name: U6, out: u6o, inputs: [u2o], fn: BUF,
+     vol: 0, voh: 5, rout: 41.67, rin: 10Meg, th: 2.5, hystwd: 1, delay: 1.5n}
+  - {kind: GATE, name: U20, out: s5c, inputs: [u6o], fn: INV,
+     vol: 0, voh: 5, rout: 41.67, rin: 10Meg, th: 2.5, hystwd: 1, delay: 0}
+
+  # ---------------- POP trigger (clock rising through 2.5 V)
+  - {kind: TRIG, name: X1, node: clk, vref: 2.5, edge: rising}
+
+probes:
+  VOUT: v(vout)
+  IL: i(L1)
+  FB: v(fb)
+  EA: v(ea)
+  SW: v(sw)
+  VSENSE: v(vsense)
+  PWM: v(pwm)
+
+analyses:
+  # 500 ns search grid: 5 us switching period means long event-free spans;
+  # the hidden-pair hunt still resolves the 10 ns clock edges (verified:
+  # identical event count and means vs 100 ns grid, 3.4x faster)
+  solver: {chunk: 500n}
+  transient: {tstop: 2m, dt: 20n}
+  pop:
+    pre_cycles: 150
+    max_iter: 100
+  pac:
+    fstart: 3k
+    fstop: 180k
+    per_decade: 10
+    inject_src: V16
+    probe_a: vout
+    probe_b: fbt

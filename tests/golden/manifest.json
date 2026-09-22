@@ -1,0 +1,69 @@
+{
+ "schema_version": 1,
+ "models": {
+  "buck5v": {
+   "model": "buck5v.yaml",
+   "model_sha256": "482b1401a075f52805c31b5adb313993dbcd1edf3af68e50d18417e7089dfcbe",
+   "period": 4.999999999999905e-06,
+   "residual": 2.327066301753948e-06,
+   "pac_status": "VALIDATED",
+   "events": 25
+  },
+  "boost24": {
+   "model": "boost24.yaml",
+   "model_sha256": "33c8fd862a80c12cd4fe84e19f6fd18a811b7ed87c9c8c1a17f4a6e4d81befc4",
+   "period": 5.000000000000013e-06,
+   "residual": 2.023488128327638e-06,
+   "pac_status": "VALIDATED",
+   "events": 25
+  },
+  "pacmini": {
+   "model": "pacmini.yaml",
+   "model_sha256": "2ad7f18fe12632ef0c1112c9f2e41785e06f85533f54ccb333decfa83e463768",
+   "period": 9.999999999999972e-07,
+   "residual": 0.0,
+   "pac_status": "VALIDATED",
+   "events": 9
+  },
+  "buck2ph": {
+   "model": "buck2ph.yaml",
+   "model_sha256": "30d563a204754af9c948a24c2240966eff627b0050a8d6b468e1317b4ad04e25",
+   "period": 2.5000000000000066e-06,
+   "residual": 5.507716897675229e-07,
+   "pac_status": "VALIDATED",
+   "events": 42
+  },
+  "sepic24": {
+   "model": "sepic24.yaml",
+   "model_sha256": "19066bb177542d3581107e2a7d41c81378ad764893fee318ad7cae3cfa147324",
+   "period": 5.000000000000013e-06,
+   "residual": 7.070993194036073e-07,
+   "pac_status": "VALIDATED",
+   "events": 25
+  },
+  "flyback24": {
+   "model": "flyback24.yaml",
+   "model_sha256": "5df33c8965f157261473aea2275c85203fec2f3cb22db0d20900a47e2f595028",
+   "period": 1.0000000000000026e-05,
+   "residual": 8.888228571586097e-06,
+   "pac_status": "VALIDATED",
+   "events": 27
+  },
+  "buckboost24": {
+   "model": "buckboost24.yaml",
+   "model_sha256": "a71b900cb7d511817ffe416540497ebda7de3377ab55b4b911ac56cc1b004fd0",
+   "period": 4.999999999999905e-06,
+   "residual": 5.340352664882307e-07,
+   "pac_status": "VALIDATED",
+   "events": 25
+  },
+  "cuk24": {
+   "model": "cuk24.yaml",
+   "model_sha256": "7750bda65c16fb79bdb2fee2afc53352d4748f913cd7028f5b63af6c0665bb73",
+   "period": 4.999999999999905e-06,
+   "residual": 3.4466803854800216e-07,
+   "pac_status": "VALIDATED",
+   "events": 25
+  }
+ }
+}

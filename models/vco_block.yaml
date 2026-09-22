@@ -1,0 +1,77 @@
+# vco_block — P2 VCO building block (TOPOLOGY_CAMPAIGN_PLAN §3).
+#
+# Triangle oscillator from EXISTING devices only: no new engine parts.
+#   f = gm * vctrl / (2 * C * dV)
+# with gm = 80u, C = 100p, dV = 4 (triangle 0.5 <-> 4.5 V around the
+# 2.5 V center, CMP hystwd = 4) -> f = 1e5 * vctrl (0.5/1.0/1.5 V ->
+# 50/100/150 kHz).  Charge and discharge currents are both gm*vctrl
+# (steered by the CMP output through analog switches on the G control
+# nodes) -> EXACT 50% duty.  The phase state v(ph) is continuous and
+# periodic: POP signature semantics untouched (the campaign section-3
+# argument).  Threshold crossings are genuine finite-slope crossings
+# (hdot = i/C), so PAC saltation is the real-crossing class.
+# LLC note: the half-bridge dead time comes from TWO offset-threshold
+# comparators on the SAME triangle (ph > 2.7 high-side, ph < 2.3
+# low-side) -- fixed gate delays cannot do break-before-make on both
+# edges; the dual-CMP triangle split is the real controller architecture.
+meta:
+  model: vco_block
+  fidelity: SIMPLIFIED
+
+devices:
+  # control input (fixed DC here; PAC injects through V16 in series)
+  - {kind: V, name: VCTL, n1: ctl, n2: fbt, value: {dc: 1.0}}
+  - {kind: V, name: V16, n1: fbt, n2: "0", value: {dc: 0}}
+
+  # triangle integrator
+  - {kind: C, name: CPH, n1: ph, n2: "0", c: 100p, ic_v: 0.5}
+
+  # steering: clk selects which G's control node sees vctrl
+  - {kind: SW, name: SUP, d1: ctl, d2: vcu, c1: clkn, c2: "0",
+     ron: 1m, roff: 1T, threshold: 2, hystwd: 100m, ic: OPEN}
+  - {kind: R, name: RPU, n1: vcu, n2: "0", r: 100k}
+  - {kind: SW, name: SDN, d1: ctl, d2: vcd, c1: clk, c2: "0",
+     ron: 1m, roff: 1T, threshold: 2, hystwd: 100m, ic: OPEN}
+  - {kind: R, name: RPD, n1: vcd, n2: "0", r: 100k}
+  - {kind: G, name: GUP, n1: "0", n2: ph, na: vcu, nb: "0", gm: 80u}
+  - {kind: G, name: GDN, n1: ph, n2: "0", na: vcd, nb: "0", gm: 80u}
+
+  # the oscillator comparator (hysteresis +-2 V around 2.5 V)
+  - {kind: CMP, name: VCO_CMP, out: clk, inp: ph, inn: vmid,
+     vol: 0, voh: 5, rout: 10, hystwd: 4, delay: 1n, ic: 0}
+  - {kind: V, name: VMID, n1: vmid, n2: "0", value: {dc: 2.5}}
+  - {kind: GATE, name: UINV, out: clkn, inputs: [clk], fn: INV,
+     vol: 0, voh: 5, rout: 41.67, rin: 10Meg, th: 2.5, hystwd: 1, delay: 0}
+
+  # TRIG on the CONTINUOUS triangle node (real finite-slope crossing),
+  # NOT on clk: clk is a CMP digital output (step transition) -- a TRIG
+  # there is event-pinned and PAC's terminal saltation is exempted by
+  # the guard, leaving Psi != FD = 0 (bring-up round 2, INVALID 999.99).
+  # vref sits 0.5 V BELOW the triangle peak: at 4.5 exactly, the CMP's
+  # 1 n delay leaves ph above the threshold for only ~2 ns and the
+  # up/down crossing pair is subband-dropped (dt/16 = 6.25 ns event
+  # bandwidth floor, bring-up round 3: TRIGGER_NOT_FOUND).  Same rules
+  # for llc24.
+  - {kind: TRIG, name: X1, node: ph, vref: 4.0, edge: rising}
+
+probes:
+  PH: v(ph)
+  CLK: v(clk)
+  CTL: v(ctl)
+
+analyses:
+  solver: {chunk: 100n}
+  transient: {tstop: 2m, dt: 5n}
+  pop:
+    pre_cycles: 100
+    max_iter: 100
+    period_guess: 10u
+    max_period_factor: 8
+  pac:
+    fstart: 100
+    fstop: 1meg
+    per_decade: 10
+    inject_src: V16
+    probe_a: ph
+    probe_b: ctl
+    period_guess: 10u      # oscillator-clocked: PAC walk window hint
